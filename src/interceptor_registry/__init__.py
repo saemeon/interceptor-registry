@@ -9,6 +9,16 @@ try:
 except PackageNotFoundError:
     __version__ = "unknown"
 
-from interceptor_registry._registry import deregister_method_interceptor, register_method_interceptor
+from interceptor_registry._registry import (
+    get_interceptors,
+    register,
+    remove,
+    remove_all,
+)
 
-__all__ = ["register_method_interceptor", "deregister_method_interceptor"]
+__all__ = [
+    "get_interceptors",
+    "register",
+    "remove",
+    "remove_all",
+]
