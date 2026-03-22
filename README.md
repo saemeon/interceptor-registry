@@ -1,45 +1,63 @@
-[![PyPI](https://img.shields.io/pypi/v/mypackage)](https://pypi.org/project/mypackage/)
-[![Python](https://img.shields.io/pypi/pyversions/mypackage)](https://pypi.org/project/mypackage/)
+[![PyPI](https://img.shields.io/pypi/v/interceptor-registry)](https://pypi.org/project/interceptor-registry/)
+[![Python](https://img.shields.io/pypi/pyversions/interceptor-registry)](https://pypi.org/project/interceptor-registry/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
 [![ty](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ty/main/assets/badge/v0.json)](https://github.com/astral-sh/ty)
 [![prek](https://img.shields.io/badge/prek-checked-blue)](https://github.com/saemeon/prek)
 
-# mypackage
+# interceptor-registry
 
-A short description of what this package does.
+Register pre/post/around interceptors on bound methods at runtime — without modifying the original class.
 
-**Full documentation at [saemeon.github.io/mypackage](https://saemeon.github.io/mypackage/)**
+**Full documentation at [saemeon.github.io/interceptor-registry](https://saemeon.github.io/interceptor-registry/)**
 
 ## Installation
 
 ```bash
-pip install mypackage
+pip install interceptor-registry
 ```
 
 ## Quick Start
 
 ```python
-import mypackage
+from contextlib import contextmanager
+from interceptor_registry import register_method_interceptor, deregister_method_interceptor
 
-# example usage
+class Foo:
+    def bar(self):
+        print("inside method call")
+        return "result"
+
+foo = Foo()
+
+def print_before():
+    print("before")
+
+@contextmanager
+def around():
+    print("enter context")
+    try:
+        yield
+    finally:
+        print("exit context")
+
+register_method_interceptor(foo.bar, print_before, callorder=-2)
+register_method_interceptor(foo.bar, around, callorder=-1)
+
+foo.bar()
+# before
+# enter context
+# inside method call
+# exit context
 ```
 
-# How to Track Template Changes
+Use `deregister_method_interceptor` with the returned ID to remove an interceptor:
 
-1. Add the remote
-run `git remote add template https://github.com/saemeon/pytemplate.git`
-
-2. Fetch the data
-run `git fetch template`
-
-3. Create a local branch that tracks the template's main
-run `git checkout -b pytemplate-main template/main`
-
-4. Switch back to your work branch and merge the template in
-run `git checkout main`
-run `git merge pytemplate-main --allow-unrelated-histories`
+```python
+id = register_method_interceptor(foo.bar, print_before, callorder=-1)
+deregister_method_interceptor(foo.bar, id)
+```
 
 ## License
 

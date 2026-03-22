@@ -1,5 +1,5 @@
-import mypackage
+import interceptor_registry
 
 
 def test_import():
-    assert mypackage.__version__ != "unknown"
+    assert interceptor_registry.__version__ != "unknown"

@@ -1,10 +1,10 @@
-site_name: mypackage
-site_description: A short description of your package
+site_name: interceptor-registry
+site_description: Register pre/post/around interceptors on bound methods at runtime
 site_author: Simon Niederberger
-site_url: https://saemeon.github.io/mypackage/
+site_url: https://saemeon.github.io/interceptor-registry/
 
-repo_url: https://github.com/saemeon/mypackage
-repo_name: saemeon/mypackage
+repo_url: https://github.com/saemeon/interceptor-registry
+repo_name: saemeon/interceptor-registry
 
 copyright: "Copyright &copy; 2026 Simon Niederberger"
 
@@ -135,4 +135,4 @@ extra:
     default: latest
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/saemeon/mypackage
+      link: https://github.com/saemeon/interceptor-registry

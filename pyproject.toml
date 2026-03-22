@@ -1,8 +1,8 @@
 [project]
-name = "mypackage"
+name = "interceptor-registry"
 dynamic = ["version"]
-description = "A short description of your package"
-keywords = ["keyword1", "keyword2"]
+description = "Register pre/post/around interceptors on bound methods at runtime"
+keywords = ["interceptor", "registry", "hooks", "method", "decorator"]
 classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -23,8 +23,8 @@ requires-python = ">=3.10"
 dependencies = []
 
 [project.urls]
-Homepage = "https://github.com/saemeon/mypackage"
-Repository = "https://github.com/saemeon/mypackage"
+Homepage = "https://github.com/saemeon/interceptor-registry"
+Repository = "https://github.com/saemeon/interceptor-registry"
 
 [dependency-groups]
 test = ["pytest", "pytest-cov"]
@@ -54,11 +54,11 @@ local_scheme = "no-local-version"
 where = ["src"]
 
 [tool.setuptools.package-data]
-mypackage = ["py.typed"]
+interceptor_registry = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=src/mypackage --cov-report=term-missing"
+addopts = "--cov=src/interceptor_registry --cov-report=term-missing"
 
 [tool.ty.src]
 include = ["src"]
