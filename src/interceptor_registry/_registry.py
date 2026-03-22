@@ -273,7 +273,12 @@ def add_interceptor(
         _ensure_registry(obj_any)
         interceptor_id = next(obj_any._registered_interceptors_id_gen)
         obj_any._registered_interceptors[registry_key][interceptor_id] = (
-            func, pass_self, pass_args, pass_kwargs, is_context_manager, callorder
+            func,
+            pass_self,
+            pass_args,
+            pass_kwargs,
+            is_context_manager,
+            callorder,
         )
         _logger.debug(f"Add interceptor '{func}' on 'obj.{name}' (obj={obj!r}).")
         return interceptor_id
@@ -286,14 +291,20 @@ def add_interceptor(
     if registry_key not in obj_any._registered_interceptors:
         original_callable = getattr(obj_any, name)
         obj_any._registered_interceptors_originals[registry_key] = (
-            name, original_callable
+            name,
+            original_callable,
         )
         wrapper = _make_wrapper(obj_any, original_callable, registry_key)
         setattr(obj_any, name, wrapper)
 
     interceptor_id = next(obj_any._registered_interceptors_id_gen)
     obj_any._registered_interceptors[registry_key][interceptor_id] = (
-        func, pass_self, pass_args, pass_kwargs, is_context_manager, callorder
+        func,
+        pass_self,
+        pass_args,
+        pass_kwargs,
+        is_context_manager,
+        callorder,
     )
     _logger.debug(f"Add interceptor '{func}' on 'obj.{name}' (obj={obj!r}).")
     return interceptor_id
@@ -458,6 +469,12 @@ def get_interceptors(obj, name: str) -> list[dict[str, Any]]:
             "is_context_manager": is_cm,
             "callorder": callorder,
         }
-        for iid, (func, pass_self, pass_args, pass_kwargs, is_cm, callorder)
-        in obj_any._registered_interceptors[registry_key].items()
+        for iid, (
+            func,
+            pass_self,
+            pass_args,
+            pass_kwargs,
+            is_cm,
+            callorder,
+        ) in obj_any._registered_interceptors[registry_key].items()
     ]

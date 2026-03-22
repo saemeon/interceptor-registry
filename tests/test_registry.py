@@ -150,7 +150,10 @@ def test_context_manager_exit_called_after_post_hooks():
 def test_pass_self_forwards_instance():
     foo = Foo()
     received = []
-    def hook(obj): received.append(obj)
+
+    def hook(obj):
+        received.append(obj)
+
     add_interceptor(foo, "bar", hook, pass_self=True, callorder=-1)
     foo.bar()
     assert received == [foo]
@@ -159,7 +162,10 @@ def test_pass_self_forwards_instance():
 def test_pass_args_forwards_positional_args():
     foo = Foo()
     received = []
-    def hook(x): received.append(x)
+
+    def hook(x):
+        received.append(x)
+
     add_interceptor(foo, "bar", hook, pass_args=True, callorder=-1)
     foo.bar("hello")
     assert received == ["hello"]
@@ -168,7 +174,10 @@ def test_pass_args_forwards_positional_args():
 def test_pass_kwargs_forwards_keyword_args():
     foo = Foo()
     received = []
-    def hook(**kw): received.append(kw)
+
+    def hook(**kw):
+        received.append(kw)
+
     add_interceptor(foo, "bar", hook, pass_kwargs=True, callorder=-1)
     foo.bar(x="hello")
     assert received == [{"x": "hello"}]
@@ -183,7 +192,10 @@ def test_callable_callorder_evaluated_at_call_time():
     foo = Foo()
     calls = []
     order = [-2]
-    def hook(): calls.append("hook")
+
+    def hook():
+        calls.append("hook")
+
     add_interceptor(foo, "bar", hook, callorder=lambda: order[0])
     foo.bar()
     assert calls == ["hook"]
@@ -193,7 +205,10 @@ def test_callable_callorder_can_change_between_calls():
     foo = Foo()
     calls = []
     order = [-1]
-    def hook(): calls.append("hook")
+
+    def hook():
+        calls.append("hook")
+
     add_interceptor(foo, "bar", hook, callorder=lambda: order[0])
     foo.bar()
     assert calls == ["hook"]
@@ -333,7 +348,10 @@ def test_get_interceptors_returns_empty_for_unregistered():
 
 def test_get_interceptors_returns_registered_entries():
     foo = Foo()
-    def hook(): pass
+
+    def hook():
+        pass
+
     iid = add_interceptor(foo, "bar", hook, pass_self=True, callorder=-1)
     result = get_interceptors(foo, "bar")
     assert len(result) == 1
@@ -352,7 +370,10 @@ def test_get_interceptors_empty_after_del_all():
 
 def test_get_interceptors_reflects_callable_callorder():
     foo = Foo()
-    def order_fn(): return -1
+
+    def order_fn():
+        return -1
+
     add_interceptor(foo, "bar", lambda: None, callorder=order_fn)
     assert get_interceptors(foo, "bar")[0]["callorder"] is order_fn
 
@@ -428,7 +449,10 @@ def test_staticmethod_restore():
 def test_staticmethod_pass_self_gives_instance():
     foo = Foo()
     received = []
-    def hook(obj): received.append(obj)
+
+    def hook(obj):
+        received.append(obj)
+
     add_interceptor(foo, "static_method", hook, pass_self=True, callorder=-1)
     foo.static_method()
     assert received == [foo]
@@ -437,7 +461,10 @@ def test_staticmethod_pass_self_gives_instance():
 def test_staticmethod_args_forwarded():
     foo = Foo()
     received = []
-    def hook(x): received.append(x)
+
+    def hook(x):
+        received.append(x)
+
     add_interceptor(foo, "static_method", hook, pass_args=True, callorder=-1)
     foo.static_method("hello")
     assert received == ["hello"]
@@ -453,7 +480,10 @@ def test_del_interceptors_on_static():
 
 def test_get_interceptors_on_static():
     foo = Foo()
-    def hook(): pass
+
+    def hook():
+        pass
+
     iid = add_interceptor(foo, "static_method", hook, callorder=-1)
     result = get_interceptors(foo, "static_method")
     assert len(result) == 1

@@ -13,6 +13,7 @@ def test_public_api():
         get_interceptors,
         has_interceptors,
     )
+
     assert callable(add_interceptor)
     assert callable(del_interceptor)
     assert callable(del_interceptors)
