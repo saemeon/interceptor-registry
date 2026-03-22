@@ -4,54 +4,68 @@ import logging
 from collections import defaultdict
 from collections.abc import Callable
 from contextlib import ExitStack
-from types import MethodType
 from typing import Any
 
 _logger = logging.getLogger(__name__)
 
-# Sentinel attribute stored on wrapper functions to identify them and recover
-# their registry key when passed back to remove() / remove_all() / get_interceptors().
+# Stamped on wrapper closures so the registry can be located from the
+# already-patched instance attribute.
 _REGISTRY_KEY_ATTR = "_interceptor_registry_key"
+_INTERCEPTOR_OWNER_ATTR = "_interceptor_owner"
 
 
-def _get_registry_key(method: MethodType) -> int:
-    """Return the registry key for a method, unwrapping our own wrappers if needed.
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
 
-    After `register` patches an object, subsequent lookups of the method return
-    the wrapper. Storing the original key on the wrapper allows `remove` and
-    friends to still find the right registry entry.
+
+def _lookup_raw_descriptor(cls: type, name: str):
+    """Return the raw class-dict entry for *name*, walking the MRO."""
+    for klass in cls.__mro__:
+        if name in vars(klass):
+            return vars(klass)[name]
+    raise AttributeError(f"'{cls.__name__}' has no attribute '{name}'")
+
+
+def _registry_key_for_descriptor(raw) -> int:
+    """Return a stable ``id``-based key for a raw class-dict descriptor."""
+    if isinstance(raw, (staticmethod, classmethod)):
+        return id(raw.__func__)
+    return id(raw)
+
+
+def _get_registry_key(obj: Any, name: str) -> int | None:
+    """Return the registry key for *name* on *obj* if it is currently patched."""
+    existing = vars(obj).get(name)
+    if existing is not None and hasattr(existing, _REGISTRY_KEY_ATTR):
+        return getattr(existing, _REGISTRY_KEY_ATTR)
+    return None
+
+
+def _make_wrapper(obj: Any, original_callable, registry_key: int) -> Callable:
+    """Return a plain-function closure that dispatches through the registry.
+
+    Stored in ``obj.__dict__`` it shadows the class-level descriptor for all
+    three kinds (instance method, classmethod, staticmethod) without triggering
+    Python's descriptor re-binding on access.
     """
-    func = method.__func__
-    if hasattr(func, _REGISTRY_KEY_ATTR):
-        return getattr(func, _REGISTRY_KEY_ATTR)
-    return id(func)
+    source = getattr(original_callable, "__func__", original_callable)
+
+    @functools.wraps(source)
+    def wrapper(*args, **kwargs):
+        return _call_method_with_hooks(
+            obj, original_callable, registry_key, *args, **kwargs
+        )
+
+    setattr(wrapper, _REGISTRY_KEY_ATTR, registry_key)
+    setattr(wrapper, _INTERCEPTOR_OWNER_ATTR, obj)
+    return wrapper
 
 
-def _trigger_hook(obj, hook_func, pass_self, pass_args, pass_kwargs, *args, **kwargs) -> Any:
-    """Execute a hook function with selectively forwarded arguments.
-
-    Parameters
-    ----------
-    obj : Any
-        The object owning the intercepted method.
-    hook_func : callable
-        The hook to execute.
-    pass_self : bool
-        If True, `obj` is passed as first positional argument.
-    pass_args : bool
-        If True, `*args` are forwarded.
-    pass_kwargs : bool
-        If True, `**kwargs` are forwarded.
-    *args
-        Positional arguments originally passed to the intercepted method.
-    **kwargs
-        Keyword arguments originally passed to the intercepted method.
-
-    Returns
-    -------
-    Any
-        The return value of `hook_func`.
-    """
+def _trigger_hook(
+    obj, hook_func, pass_self, pass_args, pass_kwargs, *args, **kwargs
+) -> Any:
+    """Call *hook_func*, forwarding owner / positional args / kwargs as requested."""
     _args: list[Any] = []
     _kwargs: dict[str, Any] = {}
     if pass_self:
@@ -64,14 +78,14 @@ def _trigger_hook(obj, hook_func, pass_self, pass_args, pass_kwargs, *args, **kw
 
 
 def _call_if_is_callable(obj):
-    """Call `obj` if it is callable and return its return value, otherwise return it unchanged."""
+    """Return ``obj()`` if *obj* is callable, otherwise return *obj* unchanged."""
     if callable(obj):
         return obj()
     return obj
 
 
 def _restore_original_method(obj, registry_key: int) -> None:
-    """Remove the wrapped instance attribute, restoring class-level method lookup."""
+    """Delete the patched instance attribute, falling back to the class-level method."""
     entry = obj._registered_interceptors_originals.pop(registry_key, None)
     if entry is not None:
         method_name, _ = entry
@@ -80,47 +94,33 @@ def _restore_original_method(obj, registry_key: int) -> None:
     del obj._registered_interceptors[registry_key]
 
 
-def call_method_with_hooks(obj, method, registry_key: int, *args, **kwargs):
-    """Call the method and trigger any interceptor registered for it.
+def _ensure_registry(obj: Any) -> None:
+    """Initialise per-object registry attributes if not already present."""
+    if not hasattr(obj, "_registered_interceptors"):
+        obj._registered_interceptors = defaultdict(dict)
+        obj._registered_interceptors_id_gen = itertools.count()
+        obj._registered_interceptors_originals = {}
 
-    Interceptors are retrieved from `obj._registered_interceptors[registry_key]`
-    and executed in ascending order of their resolved `callorder`.
 
-    Ordering semantics
-    ------------------
-    - Interceptors with `callorder < 0` are executed before the method.
-    - Interceptors with `callorder > 0` are executed after the method.
-    - Smaller absolute values execute closer to the method call.
+# ---------------------------------------------------------------------------
+# Core execution engine
+# ---------------------------------------------------------------------------
 
-    `callorder` may be a numeric value or a callable. If callable, it is
-    evaluated at invocation time to determine the effective order.
 
-    Context manager interceptors
-    ----------------------------
-    Interceptors registered with `is_context_manager=True` are expected to
-    return a context manager when called. The context is entered at the
-    interceptor's position (pre or post) and managed via `contextlib.ExitStack`.
-    All contexts are exited automatically in reverse order of entry (LIFO).
+def _call_method_with_hooks(obj, method, registry_key: int, *args, **kwargs):
+    """Execute *method* surrounded by all registered interceptors.
 
-    Parameters
-    ----------
-    obj : Any
-        The object owning the intercepted method and the registry.
-    method : callable
-        The original bound method to execute.
-    registry_key : int
-        Key under which interceptors are stored in `obj._registered_interceptors`.
-    *args
-        Positional arguments forwarded to the method and potentially to interceptors.
-    **kwargs
-        Keyword arguments forwarded to the method and potentially to interceptors.
+    Pre-hooks (``callorder < 0``) run before the method in ascending order;
+    post-hooks (``callorder > 0``) run after in ascending order.  Interceptors
+    with ``is_context_manager=True`` must return a context manager; its
+    ``__enter__`` is called at the hook's position and ``__exit__`` is called
+    automatically via ``contextlib.ExitStack`` when the outermost scope exits
+    (LIFO across all registered contexts).
 
-    Returns
-    -------
-    Any
-        The return value of the original method.
+    ``callorder`` may be a callable — evaluated fresh on every call.
+    ``callorder=0`` raises ``ValueError``.
     """
-    # Snapshot the hooks to avoid issues if the dict is mutated during execution.
+    # Snapshot so mutations during execution don't affect the current call.
     all_hooks = list(obj._registered_interceptors[registry_key].items())
 
     processed_hooks = []
@@ -128,11 +128,13 @@ def call_method_with_hooks(obj, method, registry_key: int, *args, **kwargs):
         resolved = _call_if_is_callable(callorder)
         if resolved == 0:
             raise ValueError(
-                f"Interceptor {iid!r} for '{method.__name__}' resolved callorder=0, "
-                "which is ambiguous. Use a negative value for pre-hooks "
+                f"Interceptor {iid!r} for '{getattr(method, '__name__', method)}' "
+                "resolved callorder=0. Use a negative value for pre-hooks "
                 "or a positive value for post-hooks."
             )
-        processed_hooks.append((func, pass_self, pass_args, pass_kwargs, is_cm, resolved))
+        processed_hooks.append(
+            (func, pass_self, pass_args, pass_kwargs, is_cm, resolved)
+        )
 
     sorted_hooks = sorted(processed_hooks, key=lambda x: x[-1])
 
@@ -158,8 +160,14 @@ def call_method_with_hooks(obj, method, registry_key: int, *args, **kwargs):
     return result
 
 
-def register(
-    method: MethodType,
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+
+def add_interceptor(
+    obj,
+    name: str,
     func: Callable,
     pass_self: bool = False,
     pass_args: bool = False,
@@ -167,94 +175,89 @@ def register(
     is_context_manager: bool = False,
     callorder: int | float | Callable = 1,
 ) -> int:
-    """Register an interceptor for a bound method.
+    """Add an interceptor on a callable attribute of *obj*.
 
-    The interceptor is executed whenever the given method is called.
-    Interceptors may run before the method, after the method, or wrap
-    it in a context manager.
+    Works for instance methods, classmethods, and static methods.
+    Interception is always scoped to *obj* — other instances are not affected.
+    Multiple interceptors stack; each call adds one more.
 
     Parameters
     ----------
-    method : MethodType
-        A bound method (e.g. `obj.method`). The method must be bound,
-        as the owning object is required for registration.
+    obj : Any
+        Object on which to add the interceptor.
+    name : str
+        Attribute name of the callable to intercept (e.g. ``'draw'``).
     func : Callable
-        The interceptor to register.
+        The interceptor.
     pass_self : bool, optional
-        Whether to pass `self` (the object instance) of the `method`
-        as first argument to the interceptor function.
+        Pass *obj* as the first argument to *func*.
     pass_args : bool, optional
-        Whether to forward the method's positional arguments to the
-        interceptor function.
+        Forward the intercepted call's positional arguments to *func*.
     pass_kwargs : bool, optional
-        Whether to forward the method's keyword arguments to the
-        interceptor function.
+        Forward the intercepted call's keyword arguments to *func*.
     is_context_manager : bool, optional
-        If True, `func` is expected to return a context manager when
-        called. The context is entered at the interceptor's position
-        (before or after the method depending on `callorder`) and exited
-        automatically via `contextlib.ExitStack`.
+        Treat *func*'s return value as a context manager.  Its ``__enter__``
+        is called at the interceptor's position; ``__exit__`` is called
+        automatically when the call scope exits.
     callorder : int | float | Callable, optional, default 1
-        Execution order of the interceptor.
-
-        - Negative values execute before the method.
-        - Positive values execute after the method.
-        - Zero is invalid and raises `ValueError`.
-        - Smaller absolute values execute closer to the method call.
-
-        If callable, it is evaluated at each invocation to obtain the
-        effective order. This allows dynamic ordering, e.g. passing
-        `obj.get_zorder` for matplotlib artists.
+        Execution order.  Negative = before the method, positive = after.
+        Sorted ascending: ``-2`` runs before ``-1``, ``1`` before ``2``.
+        Zero is invalid.  If callable, evaluated on every invocation.
 
     Returns
     -------
     int
-        A unique registry identifier for use with `remove`.
+        Unique registry identifier — pass to ``del_interceptor`` to remove.
 
     Raises
     ------
     ValueError
-        If `callorder` is 0 (or a callable that resolves to 0 at call time).
+        If ``callorder`` is ``0``, or resolves to ``0`` at call time.
+
+    Notes
+    -----
+    The interceptor is patched directly on *obj*'s instance ``__dict__``, so
+    it shadows the class-level descriptor only for that specific instance.
+    The original callable is restored automatically once all interceptors for
+    that attribute have been removed.
 
     Examples
     --------
-    >>> from contextlib import contextmanager
-    >>> from interceptor_registry import register
+    Pre- and post-hooks:
+
+    >>> from interceptor_registry import add_interceptor
 
     >>> class Foo:
-    ...     def bar(self):
-    ...         print("inside method call")
-    ...         return "result of method"
+    ...     def bar(self, x): return x * 2
 
     >>> foo = Foo()
+    >>> add_interceptor(foo, 'bar', lambda: print("before"), callorder=-1)
+    0
+    >>> add_interceptor(foo, 'bar', lambda: print("after"), callorder=1)
+    1
+    >>> foo.bar(3)
+    before
+    after
+    6
 
-    >>> def print_before():
-    ...     print("before")
+    Context manager around the call:
+
+    >>> from contextlib import contextmanager
+    >>> from interceptor_registry import add_interceptor
 
     >>> @contextmanager
-    ... def around():
-    ...     print("enter context")
-    ...     try:
-    ...         yield
-    ...     finally:
-    ...         print("exit context")
+    ... def timing():
+    ...     print("start")
+    ...     yield
+    ...     print("end")
 
-    >>> register(foo.bar, print_before, callorder=-2)
-    >>> register(foo.bar, around, is_context_manager=True, callorder=-1)
-
-    >>> foo.bar()
-    before
-    enter context
-    inside method call
-    exit context
-
-    'result of method'
-
-    See Also
-    --------
-    [interceptor_registry.remove][]
-    [interceptor_registry.remove_all][]
-    [interceptor_registry.get_interceptors][]
+    >>> foo2 = Foo()
+    >>> add_interceptor(foo2, 'bar', timing, is_context_manager=True, callorder=-1)
+    0
+    >>> foo2.bar(3)
+    start
+    end
+    6
     """
     if not callable(callorder) and callorder == 0:
         raise ValueError(
@@ -262,196 +265,192 @@ def register(
             "or a positive value for post-hooks."
         )
 
-    method_name = method.__name__
-    obj: Any = method.__self__
-    registry_key = _get_registry_key(method)
+    obj_any: Any = obj
 
-    if not hasattr(obj, "_registered_interceptors"):
-        obj._registered_interceptors = defaultdict(dict)
-        obj._registered_interceptors_id_gen = itertools.count()
-        obj._registered_interceptors_originals = {}
+    # Already patched — recover the key and append without re-patching.
+    registry_key = _get_registry_key(obj_any, name)
+    if registry_key is not None:
+        _ensure_registry(obj_any)
+        interceptor_id = next(obj_any._registered_interceptors_id_gen)
+        obj_any._registered_interceptors[registry_key][interceptor_id] = (
+            func, pass_self, pass_args, pass_kwargs, is_context_manager, callorder
+        )
+        _logger.debug(f"Add interceptor '{func}' on 'obj.{name}' (obj={obj!r}).")
+        return interceptor_id
 
-    # Wrap method to trigger hooks on method call, if not already wrapped.
-    if registry_key not in obj._registered_interceptors:
-        obj._registered_interceptors_originals[registry_key] = (method_name, method)
+    raw = _lookup_raw_descriptor(type(obj_any), name)
+    registry_key = _registry_key_for_descriptor(raw)
 
-        @functools.wraps(method)
-        def wrapped(obj, *args, **kwargs):
-            return call_method_with_hooks(obj, method, registry_key, *args, **kwargs)
+    _ensure_registry(obj_any)
 
-        # Store the key on the wrapper so _get_registry_key can recover it later.
-        setattr(wrapped, _REGISTRY_KEY_ATTR, registry_key)
-        setattr(obj, method_name, MethodType(wrapped, obj))
+    if registry_key not in obj_any._registered_interceptors:
+        original_callable = getattr(obj_any, name)
+        obj_any._registered_interceptors_originals[registry_key] = (
+            name, original_callable
+        )
+        wrapper = _make_wrapper(obj_any, original_callable, registry_key)
+        setattr(obj_any, name, wrapper)
 
-    interceptor_id = next(obj._registered_interceptors_id_gen)
-    obj._registered_interceptors[registry_key][interceptor_id] = (
+    interceptor_id = next(obj_any._registered_interceptors_id_gen)
+    obj_any._registered_interceptors[registry_key][interceptor_id] = (
         func, pass_self, pass_args, pass_kwargs, is_context_manager, callorder
     )
-
-    _logger.debug(f"Register '{func}' to 'obj.{method_name}' on obj '{obj}'.")
-
+    _logger.debug(f"Add interceptor '{func}' on 'obj.{name}' (obj={obj!r}).")
     return interceptor_id
 
 
-def remove(method: MethodType, interceptor_id: int) -> None:
-    """Remove a previously registered interceptor from a bound method.
+def del_interceptor(obj, name: str, interceptor_id: int) -> None:
+    """Remove one interceptor by id.
 
-    When the last interceptor for a method is removed, the original method
-    is restored and all registry state for that method is cleaned up.
+    Restores the original callable when the last interceptor is removed.
+    Silently does nothing if *interceptor_id* is not found or *name* is
+    not currently patched on *obj*.
 
     Parameters
     ----------
-    method : MethodType
-        The bound method from which to remove the interceptor.
+    obj : Any
+        The same object passed to ``add_interceptor``.
+    name : str
+        The same attribute name passed to ``add_interceptor``.
     interceptor_id : int
-        The registry identifier returned by `register`.
+        Value returned by ``add_interceptor``.
 
     Notes
     -----
-    If the interceptor identifier is not found, this function silently
-    returns without raising an error.
+    When the last interceptor for *name* is removed the original callable is
+    restored and all registry state for that attribute is cleaned up.
 
     Examples
     --------
-    >>> from interceptor_registry import register, remove
+    >>> from interceptor_registry import add_interceptor, del_interceptor
 
     >>> class Foo:
-    ...     def bar(self):
-    ...         print("inside method call")
-    ...         return "result of method"
+    ...     def bar(self): return "result"
 
     >>> foo = Foo()
-
-    >>> def print_before():
-    ...     print("before")
-
-    >>> interceptor_id = register(foo.bar, print_before, callorder=-1)
-
+    >>> iid = add_interceptor(foo, 'bar', lambda: print("before"), callorder=-1)
     >>> foo.bar()
     before
-    inside method call
-
-    'result of method'
-    >>> remove(foo.bar, interceptor_id)
-
+    'result'
+    >>> del_interceptor(foo, 'bar', iid)
     >>> foo.bar()
-    inside method call
-
-    'result of method'
-
-    See Also
-    --------
-    [interceptor_registry.register][]
-    [interceptor_registry.remove_all][]
+    'result'
     """
-    obj: Any = method.__self__
-    if not hasattr(obj, "_registered_interceptors"):
+    obj_any: Any = obj
+    registry_key = _get_registry_key(obj_any, name)
+    if registry_key is None or not hasattr(obj_any, "_registered_interceptors"):
         return
 
-    registry_key = _get_registry_key(method)
+    if interceptor_id in obj_any._registered_interceptors[registry_key]:
+        del obj_any._registered_interceptors[registry_key][interceptor_id]
 
-    if interceptor_id in obj._registered_interceptors[registry_key]:
-        del obj._registered_interceptors[registry_key][interceptor_id]
-
-    if not obj._registered_interceptors[registry_key]:
-        _restore_original_method(obj, registry_key)
+    if not obj_any._registered_interceptors[registry_key]:
+        _restore_original_method(obj_any, registry_key)
 
 
-def remove_all(method: MethodType) -> None:
-    """Remove all interceptors registered for a bound method and restore the original.
+def del_interceptors(obj, name: str) -> None:
+    """Remove all interceptors for *name* on *obj* and restore the original.
+
+    Silently does nothing if *name* is not currently patched on *obj*.
 
     Parameters
     ----------
-    method : MethodType
-        The bound method for which all interceptors should be removed.
-
-    Notes
-    -----
-    If no interceptors are registered for the method, this function silently
-    returns without raising an error.
+    obj : Any
+        The same object passed to ``add_interceptor``.
+    name : str
+        The same attribute name passed to ``add_interceptor``.
 
     Examples
     --------
-    >>> from interceptor_registry import register, remove_all
+    >>> from interceptor_registry import add_interceptor, del_interceptors
 
     >>> class Foo:
-    ...     def bar(self):
-    ...         return "result"
+    ...     def bar(self): return "result"
 
     >>> foo = Foo()
-    >>> register(foo.bar, lambda: None, callorder=-1)
-    >>> register(foo.bar, lambda: None, callorder=1)
-    >>> remove_all(foo.bar)
-
-    See Also
-    --------
-    [interceptor_registry.register][]
-    [interceptor_registry.remove][]
+    >>> add_interceptor(foo, 'bar', lambda: print("a"), callorder=-2)
+    0
+    >>> add_interceptor(foo, 'bar', lambda: print("b"), callorder=-1)
+    1
+    >>> del_interceptors(foo, 'bar')
+    >>> foo.bar()
+    'result'
     """
-    obj: Any = method.__self__
-    if not hasattr(obj, "_registered_interceptors"):
+    obj_any: Any = obj
+    registry_key = _get_registry_key(obj_any, name)
+    if registry_key is None or not hasattr(obj_any, "_registered_interceptors"):
+        return
+    if registry_key not in obj_any._registered_interceptors:
         return
 
-    registry_key = _get_registry_key(method)
-    if registry_key not in obj._registered_interceptors:
-        return
-
-    obj._registered_interceptors[registry_key].clear()
-    _restore_original_method(obj, registry_key)
+    obj_any._registered_interceptors[registry_key].clear()
+    _restore_original_method(obj_any, registry_key)
 
 
-def get_interceptors(method: MethodType) -> list[dict[str, Any]]:
-    """Return the list of registered interceptors for a bound method.
+def has_interceptors(obj, name: str) -> bool:
+    """Return ``True`` if *name* on *obj* has any registered interceptors.
 
     Parameters
     ----------
-    method : MethodType
-        The bound method to introspect.
-
-    Returns
-    -------
-    list[dict]
-        One entry per registered interceptor, in registration order, each with:
-
-        - ``id`` — the registry identifier (int)
-        - ``func`` — the interceptor callable
-        - ``pass_self`` — bool
-        - ``pass_args`` — bool
-        - ``pass_kwargs`` — bool
-        - ``is_context_manager`` — bool
-        - ``callorder`` — the raw registered value (may be callable)
-
-        Returns an empty list if no interceptors are registered.
+    obj : Any
+        The same object passed to ``add_interceptor``.
+    name : str
+        The same attribute name passed to ``add_interceptor``.
 
     Examples
     --------
-    >>> from interceptor_registry import register, get_interceptors
+    >>> from interceptor_registry import (
+    ...     add_interceptor, del_interceptors, has_interceptors
+    ... )
 
     >>> class Foo:
     ...     def bar(self): pass
 
     >>> foo = Foo()
-    >>> def hook(): pass
-    >>> register(foo.bar, hook, callorder=-1)
-    >>> get_interceptors(foo.bar)
-    [{'id': 0, 'func': <function hook ...>, 'pass_self': False, 'pass_args': False,
-      'pass_kwargs': False, 'is_context_manager': False, 'callorder': -1}]
-
-    See Also
-    --------
-    [interceptor_registry.register][]
+    >>> has_interceptors(foo, 'bar')
+    False
+    >>> add_interceptor(foo, 'bar', lambda: None, callorder=-1)
+    0
+    >>> has_interceptors(foo, 'bar')
+    True
+    >>> del_interceptors(foo, 'bar')
+    >>> has_interceptors(foo, 'bar')
+    False
     """
-    obj: Any = method.__self__
-    if not hasattr(obj, "_registered_interceptors"):
-        return []
+    obj_any: Any = obj
+    registry_key = _get_registry_key(obj_any, name)
+    if registry_key is None or not hasattr(obj_any, "_registered_interceptors"):
+        return False
+    return bool(obj_any._registered_interceptors.get(registry_key))
 
-    registry_key = _get_registry_key(method)
-    if registry_key not in obj._registered_interceptors:
+
+def get_interceptors(obj, name: str) -> list[dict[str, Any]]:
+    """Return all interceptors added for *name* on *obj*, in registration order.
+
+    Parameters
+    ----------
+    obj : Any
+        The same object passed to ``add_interceptor``.
+    name : str
+        The same attribute name passed to ``add_interceptor``.
+
+    Returns
+    -------
+    list[dict]
+        Each dict contains ``id``, ``func``, ``pass_self``, ``pass_args``,
+        ``pass_kwargs``, ``is_context_manager``, and ``callorder`` (raw
+        registered value — may be a callable).  Empty list if none registered.
+    """
+    obj_any: Any = obj
+    registry_key = _get_registry_key(obj_any, name)
+    if registry_key is None or not hasattr(obj_any, "_registered_interceptors"):
+        return []
+    if registry_key not in obj_any._registered_interceptors:
         return []
 
     return [
         {
-            "id": interceptor_id,
+            "id": iid,
             "func": func,
             "pass_self": pass_self,
             "pass_args": pass_args,
@@ -459,6 +458,6 @@ def get_interceptors(method: MethodType) -> list[dict[str, Any]]:
             "is_context_manager": is_cm,
             "callorder": callorder,
         }
-        for interceptor_id, (func, pass_self, pass_args, pass_kwargs, is_cm, callorder)
-        in obj._registered_interceptors[registry_key].items()
+        for iid, (func, pass_self, pass_args, pass_kwargs, is_cm, callorder)
+        in obj_any._registered_interceptors[registry_key].items()
     ]

@@ -8,7 +8,7 @@
 
 # interceptor-registry
 
-Register pre/post/around interceptors on bound methods at runtime — without modifying the original class.
+Add pre/post/around interceptors on bound methods at runtime — without modifying the original class.
 
 **Full documentation at [saemeon.github.io/interceptor-registry](https://saemeon.github.io/interceptor-registry/)**
 
@@ -22,12 +22,16 @@ pip install interceptor-registry
 
 ```python
 from contextlib import contextmanager
-from interceptor_registry import register_method_interceptor, deregister_method_interceptor
+from interceptor_registry import add_interceptor, del_interceptor, del_interceptors
 
 class Foo:
     def bar(self):
         print("inside method call")
         return "result"
+
+    @staticmethod
+    def static_bar(x):
+        return x * 2
 
 foo = Foo()
 
@@ -42,21 +46,27 @@ def around():
     finally:
         print("exit context")
 
-register_method_interceptor(foo.bar, print_before, callorder=-2)
-register_method_interceptor(foo.bar, around, callorder=-1)
+add_interceptor(foo, 'bar', print_before, callorder=-2)
+add_interceptor(foo, 'bar', around, is_context_manager=True, callorder=-1)
 
 foo.bar()
 # before
 # enter context
 # inside method call
 # exit context
+
+# Works the same for classmethods and staticmethods
+add_interceptor(foo, 'static_bar', print_before, callorder=-1)
 ```
 
-Use `deregister_method_interceptor` with the returned ID to remove an interceptor:
+Use `del_interceptor` with the returned ID to remove a single interceptor,
+or `del_interceptors` to clear all:
 
 ```python
-id = register_method_interceptor(foo.bar, print_before, callorder=-1)
-deregister_method_interceptor(foo.bar, id)
+iid = add_interceptor(foo, 'bar', print_before, callorder=-1)
+del_interceptor(foo, 'bar', iid)
+
+del_interceptors(foo, 'bar')
 ```
 
 ## License

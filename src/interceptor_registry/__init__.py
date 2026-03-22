@@ -10,15 +10,17 @@ except PackageNotFoundError:
     __version__ = "unknown"
 
 from interceptor_registry._registry import (
+    add_interceptor,
+    del_interceptor,
+    del_interceptors,
     get_interceptors,
-    register,
-    remove,
-    remove_all,
+    has_interceptors,
 )
 
 __all__ = [
+    "add_interceptor",
+    "del_interceptor",
+    "del_interceptors",
     "get_interceptors",
-    "register",
-    "remove",
-    "remove_all",
+    "has_interceptors",
 ]
