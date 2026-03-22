@@ -1,7 +1,7 @@
 [project]
 name = "interceptor-registry"
 dynamic = ["version"]
-description = "Register pre/post/around interceptors on bound methods at runtime"
+description = "Add pre/post/around interceptors on bound methods at runtime"
 keywords = ["interceptor", "registry", "hooks", "method", "decorator"]
 classifiers = [
     "Programming Language :: Python :: 3.10",

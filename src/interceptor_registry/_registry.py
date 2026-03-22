@@ -29,7 +29,7 @@ def _lookup_raw_descriptor(cls: type, name: str):
 
 def _registry_key_for_descriptor(raw) -> int:
     """Return a stable ``id``-based key for a raw class-dict descriptor."""
-    if isinstance(raw, (staticmethod, classmethod)):
+    if isinstance(raw, staticmethod | classmethod):
         return id(raw.__func__)
     return id(raw)
 
