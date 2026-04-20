@@ -587,8 +587,8 @@ affected.  Multiple interceptors stack; each call adds one more.</p>
             </td>
             <td class="doc-param-details">
               <div class="doc-md-description">
-                <p>The interceptor.  Must be synchronous — <code>async def</code> hooks are
-not supported in this version.</p>
+                <p>The interceptor. Must be synchronous — <code>async def</code> / async-generator
+hooks are rejected with :class:<code>TypeError</code> at registration.</p>
               </div>
               <p>
                   <span class="doc-param-annotation">
@@ -604,7 +604,7 @@ not supported in this version.</p>
             </td>
             <td class="doc-param-details">
               <div class="doc-md-description">
-                <p>Pass <em>obj</em> as the first argument to <em>func</em>.</p>
+                <p>Pass <em>obj</em> as the first argument to <em>func</em>. By default False.</p>
               </div>
               <p>
                   <span class="doc-param-annotation">
@@ -624,7 +624,8 @@ not supported in this version.</p>
             </td>
             <td class="doc-param-details">
               <div class="doc-md-description">
-                <p>Forward the intercepted call's positional arguments to <em>func</em>.</p>
+                <p>Forward the intercepted call's positional arguments to <em>func</em>.
+By default False.</p>
               </div>
               <p>
                   <span class="doc-param-annotation">
@@ -644,7 +645,8 @@ not supported in this version.</p>
             </td>
             <td class="doc-param-details">
               <div class="doc-md-description">
-                <p>Forward the intercepted call's keyword arguments to <em>func</em>.</p>
+                <p>Forward the intercepted call's keyword arguments to <em>func</em>.
+By default False.</p>
               </div>
               <p>
                   <span class="doc-param-annotation">
@@ -664,10 +666,12 @@ not supported in this version.</p>
             </td>
             <td class="doc-param-details">
               <div class="doc-md-description">
-                <p>Treat <em>func</em>'s return value as a (synchronous) context manager.
+                <p>Treat <em>func</em>'s return value as a synchronous context manager.
 Its <code>__enter__</code> is called at the interceptor's position;
-<code>__exit__</code> is called automatically when the call scope exits.
-Async context managers are not supported.</p>
+<code>__exit__</code> is called automatically when the call scope exits,
+receiving any exception raised by the method body or by
+later hooks. Async context managers are not supported. By
+default False.</p>
               </div>
               <p>
                   <span class="doc-param-annotation">
@@ -687,9 +691,10 @@ Async context managers are not supported.</p>
             </td>
             <td class="doc-param-details">
               <div class="doc-md-description">
-                <p>Execution order.  Negative = before the method, positive = after.
-Sorted ascending: <code>-2</code> runs before <code>-1</code>, <code>1</code> before <code>2</code>.
-Zero is invalid.  If callable, evaluated on every invocation.</p>
+                <p>Execution order. Negative = before the method, positive =
+after. Sorted ascending: <code>-2</code> runs before <code>-1</code>, <code>1</code>
+before <code>2</code>. Zero is invalid. If callable, evaluated on
+every invocation. By default 1.</p>
               </div>
               <p>
                   <span class="doc-param-annotation">
@@ -772,15 +777,32 @@ async generator function (async hooks are out of scope).</p>
     </table>
 
 
+<details class="see-also" open>
+  <summary>See Also</summary>
+  <p>del_interceptor : Remove one interceptor by its registry id.
+del_interceptors : Remove every interceptor for a given name.
+has_interceptors : Check whether any interceptor is registered.
+get_interceptors : Snapshot every interceptor registered on <em>name</em>.</p>
+</details>
+
 <details class="note" open>
   <summary>Notes</summary>
-  <p>The interceptor is patched directly on <em>obj</em>'s instance <code>__dict__</code>,
-so it shadows the class-level descriptor only for that specific
-instance.  The original callable is restored automatically once all
-interceptors for that attribute have been removed.</p>
+  <p>The interceptor is patched directly on <em>obj</em>'s instance
+<code>__dict__</code>, so it shadows the class-level descriptor only for
+that specific instance. The original callable is restored
+automatically once all interceptors for that attribute have been
+removed.</p>
 <p>Registry state is held in a module-level
 :class:<code>weakref.WeakKeyDictionary</code> keyed by <em>obj</em> — nothing is
-written to <em>obj</em>'s instance dict beyond the wrapper itself.</p>
+written to <em>obj</em>'s instance dict beyond the wrapper itself.
+Targets with <code>__slots__</code> that exclude <code>__weakref__</code> fall
+back to an <code>__interceptor_registry__</code> attribute on the
+instance.</p>
+<p>When a context-manager hook's <code>__exit__</code> suppresses an
+exception raised by the method body (returns <code>True</code>), the
+wrapped call returns <code>None</code> for non-generator methods;
+generator and async-generator methods terminate without
+further yields.</p>
 </details>
 
 <p><span class="doc-section-title">Examples:</span></p>

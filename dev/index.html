@@ -383,8 +383,41 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#async-generator-and-async-generator-methods" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Async, generator, and async-generator methods
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exception-suppression" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exception suppression
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#not-supported" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Not supported
+      
+    </span>
+  </a>
   
 </li>
       
@@ -527,8 +560,41 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#async-generator-and-async-generator-methods" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Async, generator, and async-generator methods
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exception-suppression" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exception suppression
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#not-supported" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Not supported
+      
+    </span>
+  </a>
   
 </li>
       
@@ -581,7 +647,7 @@
 
 <h1 id="interceptor-registry">interceptor-registry<a class="headerlink" href="#interceptor-registry" title="Permanent link">&para;</a></h1>
 <p>Add pre/post/around interceptors on bound methods at runtime — without modifying the original class.</p>
-<p>Interception is always <strong>instance-scoped</strong>: patching <code>foo.bar</code> only affects that specific object, not other instances of the same class.  Works for instance methods, classmethods, and static methods.</p>
+<p>Interception is always <strong>instance-scoped</strong>: patching <code>foo.bar</code> only affects that specific object, not other instances of the same class. Works for instance methods, classmethods, staticmethods, <code>async def</code> methods, generator methods, and async-generator methods.</p>
 <h2 id="installation">Installation<a class="headerlink" href="#installation" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>interceptor-registry
 </code></pre></div>
@@ -635,6 +701,41 @@
 <span class="n">add_interceptor</span><span class="p">(</span><span class="n">foo</span><span class="p">,</span> <span class="s2">&quot;process&quot;</span><span class="p">,</span> <span class="k">lambda</span><span class="p">:</span> <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;before process&quot;</span><span class="p">),</span> <span class="n">callorder</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
 <span class="n">add_interceptor</span><span class="p">(</span><span class="n">foo</span><span class="p">,</span> <span class="s2">&quot;validate&quot;</span><span class="p">,</span> <span class="k">lambda</span><span class="p">:</span> <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;before validate&quot;</span><span class="p">),</span> <span class="n">callorder</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
 </code></pre></div>
+<h3 id="async-generator-and-async-generator-methods">Async, generator, and async-generator methods<a class="headerlink" href="#async-generator-and-async-generator-methods" title="Permanent link">&para;</a></h3>
+<p>Interception works identically for all coroutine and iterator forms — the API is the same, the wrapper detects the method kind and awaits / iterates / async-iterates as appropriate so pre-hooks, post-hooks, and <code>is_context_manager=True</code> hooks all wrap the body correctly.</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">asyncio</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">Service</span><span class="p">:</span>
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">fetch</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>                <span class="c1"># async def</span>
+        <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+        <span class="k">return</span> <span class="s2">&quot;data&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">stream</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>                     <span class="c1"># generator</span>
+        <span class="k">yield</span> <span class="mi">1</span>
+        <span class="k">yield</span> <span class="mi">2</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">subscribe</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>            <span class="c1"># async generator</span>
+        <span class="k">yield</span> <span class="s2">&quot;event-a&quot;</span>
+        <span class="k">yield</span> <span class="s2">&quot;event-b&quot;</span>
+
+<span class="n">svc</span> <span class="o">=</span> <span class="n">Service</span><span class="p">()</span>
+<span class="n">add_interceptor</span><span class="p">(</span><span class="n">svc</span><span class="p">,</span> <span class="s2">&quot;fetch&quot;</span><span class="p">,</span> <span class="k">lambda</span><span class="p">:</span> <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;before await&quot;</span><span class="p">),</span> <span class="n">callorder</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+<span class="n">add_interceptor</span><span class="p">(</span><span class="n">svc</span><span class="p">,</span> <span class="s2">&quot;stream&quot;</span><span class="p">,</span> <span class="k">lambda</span><span class="p">:</span> <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;after iteration done&quot;</span><span class="p">),</span> <span class="n">callorder</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+
+<span class="n">asyncio</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">svc</span><span class="o">.</span><span class="n">fetch</span><span class="p">())</span>        <span class="c1"># prints &quot;before await&quot; before the body</span>
+<span class="nb">list</span><span class="p">(</span><span class="n">svc</span><span class="o">.</span><span class="n">stream</span><span class="p">())</span>              <span class="c1"># prints &quot;after iteration done&quot; after iteration</span>
+</code></pre></div>
+<p>Async generators also correctly forward <code>asend()</code>, <code>athrow()</code>, and <code>aclose()</code> through the interceptor layer to the underlying body.</p>
+<h3 id="exception-suppression">Exception suppression<a class="headerlink" href="#exception-suppression" title="Permanent link">&para;</a></h3>
+<p>If an <code>is_context_manager=True</code> hook's <code>__exit__</code> returns <code>True</code> to suppress an exception raised by the method body, the call returns <code>None</code> for non-generator methods, and generators / async-generators terminate without further yields. Pre-hooks that have already entered still receive their <code>__exit__</code> in LIFO order with the exception info.</p>
+<h2 id="not-supported">Not supported<a class="headerlink" href="#not-supported" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Properties and other non-callable custom descriptors (<code>TypeError</code> at registration).</li>
+<li>Async hook functions — <code>async def</code> or async-generator hooks (<code>TypeError</code> at registration).</li>
+<li>Async context-manager hooks — <code>@asynccontextmanager</code> passed with <code>is_context_manager=True</code> (<code>TypeError</code> when invoked).</li>
+<li>Pickle of a patched object (closures generally aren't picklable). Call <code>del_interceptors</code> before <code>pickle.dumps</code>, re-add after unpickling.</li>
+<li><code>copy.copy</code> / <code>copy.deepcopy</code> of a patched object copies the wrapper closure too, so interceptors fire on the copy as if registered on the original. Known footgun — <code>del_interceptors</code> first if independent state is desired.</li>
+</ul>
 <h2 id="callorder">callorder<a class="headerlink" href="#callorder" title="Permanent link">&para;</a></h2>
 <p><code>callorder</code> determines when an interceptor runs relative to the method call and to other interceptors:</p>
 <table>
