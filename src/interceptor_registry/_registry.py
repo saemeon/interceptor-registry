@@ -631,23 +631,28 @@ def add_interceptor(
     name : str
         Attribute name of the callable to intercept (e.g. ``'draw'``).
     func : Callable
-        The interceptor.  Must be synchronous — ``async def`` hooks are
-        not supported in this version.
+        The interceptor. Must be synchronous — ``async def`` / async-generator
+        hooks are rejected with :class:`TypeError` at registration.
     pass_self : bool, optional
-        Pass *obj* as the first argument to *func*.
+        Pass *obj* as the first argument to *func*. By default False.
     pass_args : bool, optional
         Forward the intercepted call's positional arguments to *func*.
+        By default False.
     pass_kwargs : bool, optional
         Forward the intercepted call's keyword arguments to *func*.
+        By default False.
     is_context_manager : bool, optional
-        Treat *func*'s return value as a (synchronous) context manager.
+        Treat *func*'s return value as a synchronous context manager.
         Its ``__enter__`` is called at the interceptor's position;
-        ``__exit__`` is called automatically when the call scope exits.
-        Async context managers are not supported.
-    callorder : int | float | Callable, optional, default 1
-        Execution order.  Negative = before the method, positive = after.
-        Sorted ascending: ``-2`` runs before ``-1``, ``1`` before ``2``.
-        Zero is invalid.  If callable, evaluated on every invocation.
+        ``__exit__`` is called automatically when the call scope exits,
+        receiving any exception raised by the method body or by
+        later hooks. Async context managers are not supported. By
+        default False.
+    callorder : int | float | Callable, optional
+        Execution order. Negative = before the method, positive =
+        after. Sorted ascending: ``-2`` runs before ``-1``, ``1``
+        before ``2``. Zero is invalid. If callable, evaluated on
+        every invocation. By default 1.
 
     Returns
     -------
@@ -666,16 +671,33 @@ def add_interceptor(
         raised at registration time if *func* is an ``async def`` or
         async generator function (async hooks are out of scope).
 
+    See Also
+    --------
+    del_interceptor : Remove one interceptor by its registry id.
+    del_interceptors : Remove every interceptor for a given name.
+    has_interceptors : Check whether any interceptor is registered.
+    get_interceptors : Snapshot every interceptor registered on *name*.
+
     Notes
     -----
-    The interceptor is patched directly on *obj*'s instance ``__dict__``,
-    so it shadows the class-level descriptor only for that specific
-    instance.  The original callable is restored automatically once all
-    interceptors for that attribute have been removed.
+    The interceptor is patched directly on *obj*'s instance
+    ``__dict__``, so it shadows the class-level descriptor only for
+    that specific instance. The original callable is restored
+    automatically once all interceptors for that attribute have been
+    removed.
 
     Registry state is held in a module-level
     :class:`weakref.WeakKeyDictionary` keyed by *obj* — nothing is
     written to *obj*'s instance dict beyond the wrapper itself.
+    Targets with ``__slots__`` that exclude ``__weakref__`` fall
+    back to an ``__interceptor_registry__`` attribute on the
+    instance.
+
+    When a context-manager hook's ``__exit__`` suppresses an
+    exception raised by the method body (returns ``True``), the
+    wrapped call returns ``None`` for non-generator methods;
+    generator and async-generator methods terminate without
+    further yields.
 
     Examples
     --------

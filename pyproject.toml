@@ -27,7 +27,7 @@ Homepage = "https://github.com/saemeon/interceptor-registry"
 Repository = "https://github.com/saemeon/interceptor-registry"
 
 [dependency-groups]
-test = ["pytest", "pytest-cov"]
+test = ["pytest", "pytest-cov", "pytest-asyncio"]
 doc = [
     "mkdocs",
     "mkdocs-material",
@@ -57,8 +57,12 @@ where = ["src"]
 interceptor_registry = ["py.typed"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
-addopts = "--cov=src/interceptor_registry --cov-report=term-missing"
+testpaths = ["tests", "src"]
+addopts = "--cov=src/interceptor_registry --cov-report=term-missing --doctest-modules"
+asyncio_mode = "auto"
+markers = [
+    "slow: marks tests that are slow (concurrency stress); deselect with '-m \"not slow\"'",
+]
 
 [tool.ty.src]
 include = ["src"]

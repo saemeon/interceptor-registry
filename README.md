@@ -55,7 +55,8 @@ foo.bar()
 # inside method call
 # exit context
 
-# Works the same for classmethods and staticmethods
+# Works for instance methods, classmethods, staticmethods, async methods,
+# generator methods, and async-generator methods.
 add_interceptor(foo, 'static_bar', print_before, callorder=-1)
 ```
 
@@ -68,6 +69,17 @@ del_interceptor(foo, 'bar', iid)
 
 del_interceptors(foo, 'bar')
 ```
+
+## Not supported
+
+- Properties and other non-callable custom descriptors (raises
+  `TypeError` at registration).
+- Async hook functions — `async def` / async-generator hooks
+  (raises `TypeError` at registration).
+- Async context-manager hooks (`@asynccontextmanager` passed with
+  `is_context_manager=True`) — raises `TypeError` when invoked.
+- Pickling of patched objects. Call `del_interceptors` before
+  pickling, re-add after unpickling.
 
 ## License
 
