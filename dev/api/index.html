@@ -535,9 +535,10 @@
     <div class="doc doc-contents first">
 
         <p>Add an interceptor on a callable attribute of <em>obj</em>.</p>
-<p>Works for instance methods, classmethods, and static methods.
-Interception is always scoped to <em>obj</em> — other instances are not affected.
-Multiple interceptors stack; each call adds one more.</p>
+<p>Works for instance methods, classmethods, staticmethods, <code>async def</code>
+methods, generator methods, and async-generator methods.  Interception
+is always scoped to <em>obj</em> — other instances of the same class are not
+affected.  Multiple interceptors stack; each call adds one more.</p>
 
 
 <table>
@@ -586,7 +587,8 @@ Multiple interceptors stack; each call adds one more.</p>
             </td>
             <td class="doc-param-details">
               <div class="doc-md-description">
-                <p>The interceptor.</p>
+                <p>The interceptor.  Must be synchronous — <code>async def</code> hooks are
+not supported in this version.</p>
               </div>
               <p>
                   <span class="doc-param-annotation">
@@ -662,9 +664,10 @@ Multiple interceptors stack; each call adds one more.</p>
             </td>
             <td class="doc-param-details">
               <div class="doc-md-description">
-                <p>Treat <em>func</em>'s return value as a context manager.  Its <code>__enter__</code>
-is called at the interceptor's position; <code>__exit__</code> is called
-automatically when the call scope exits.</p>
+                <p>Treat <em>func</em>'s return value as a (synchronous) context manager.
+Its <code>__enter__</code> is called at the interceptor's position;
+<code>__exit__</code> is called automatically when the call scope exits.
+Async context managers are not supported.</p>
               </div>
               <p>
                   <span class="doc-param-annotation">
@@ -720,7 +723,8 @@ Zero is invalid.  If callable, evaluated on every invocation.</p>
             </td>
             <td class="doc-returns-details">
               <div class="doc-md-description">
-                <p>Unique registry identifier — pass to <code>del_interceptor</code> to remove.</p>
+                <p>Unique registry identifier — pass to :func:<code>del_interceptor</code> to
+remove.</p>
               </div>
             </td>
           </tr>
@@ -748,16 +752,35 @@ Zero is invalid.  If callable, evaluated on every invocation.</p>
               </div>
             </td>
           </tr>
+          <tr class="doc-section-item">
+            <td>
+              <span class="doc-raises-annotation">
+                  <code><span title="TypeError">TypeError</span></code>
+              </span>
+            </td>
+            <td class="doc-raises-details">
+              <div class="doc-md-description">
+                <p>If <em>name</em> resolves to a :class:<code>property</code> or another non-callable
+descriptor (supported kinds are instance method, classmethod,
+staticmethod, and async / generator variants thereof).  Also
+raised at registration time if <em>func</em> is an <code>async def</code> or
+async generator function (async hooks are out of scope).</p>
+              </div>
+            </td>
+          </tr>
       </tbody>
     </table>
 
 
 <details class="note" open>
   <summary>Notes</summary>
-  <p>The interceptor is patched directly on <em>obj</em>'s instance <code>__dict__</code>, so
-it shadows the class-level descriptor only for that specific instance.
-The original callable is restored automatically once all interceptors for
-that attribute have been removed.</p>
+  <p>The interceptor is patched directly on <em>obj</em>'s instance <code>__dict__</code>,
+so it shadows the class-level descriptor only for that specific
+instance.  The original callable is restored automatically once all
+interceptors for that attribute have been removed.</p>
+<p>Registry state is held in a module-level
+:class:<code>weakref.WeakKeyDictionary</code> keyed by <em>obj</em> — nothing is
+written to <em>obj</em>'s instance dict beyond the wrapper itself.</p>
 </details>
 
 <p><span class="doc-section-title">Examples:</span></p>
@@ -811,9 +834,9 @@ that attribute have been removed.</p>
     <div class="doc doc-contents first">
 
         <p>Remove one interceptor by id.</p>
-<p>Restores the original callable when the last interceptor is removed.
-Silently does nothing if <em>interceptor_id</em> is not found or <em>name</em> is
-not currently patched on <em>obj</em>.</p>
+<p>Restores the original callable when the last interceptor for <em>name</em>
+is removed.  Silently does nothing if <em>interceptor_id</em> is not found
+or <em>name</em> is not currently patched on <em>obj</em>.</p>
 
 
 <table>
@@ -830,7 +853,7 @@ not currently patched on <em>obj</em>.</p>
             </td>
             <td class="doc-param-details">
               <div class="doc-md-description">
-                <p>The same object passed to <code>add_interceptor</code>.</p>
+                <p>The same object passed to :func:<code>add_interceptor</code>.</p>
               </div>
               <p>
                   <span class="doc-param-annotation">
@@ -846,7 +869,7 @@ not currently patched on <em>obj</em>.</p>
             </td>
             <td class="doc-param-details">
               <div class="doc-md-description">
-                <p>The same attribute name passed to <code>add_interceptor</code>.</p>
+                <p>The same attribute name passed to :func:<code>add_interceptor</code>.</p>
               </div>
               <p>
                   <span class="doc-param-annotation">
@@ -862,7 +885,7 @@ not currently patched on <em>obj</em>.</p>
             </td>
             <td class="doc-param-details">
               <div class="doc-md-description">
-                <p>Value returned by <code>add_interceptor</code>.</p>
+                <p>Value returned by :func:<code>add_interceptor</code>.</p>
               </div>
               <p>
                   <span class="doc-param-annotation">
@@ -875,12 +898,6 @@ not currently patched on <em>obj</em>.</p>
       </tbody>
     </table>
 
-
-<details class="note" open>
-  <summary>Notes</summary>
-  <p>When the last interceptor for <em>name</em> is removed the original callable is
-restored and all registry state for that attribute is cleaned up.</p>
-</details>
 
 <p><span class="doc-section-title">Examples:</span></p>
     <div class="highlight"><pre><span></span><code><span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span><span class="w"> </span><span class="nn">interceptor_registry</span><span class="w"> </span><span class="kn">import</span> <span class="n">add_interceptor</span><span class="p">,</span> <span class="n">del_interceptor</span>
@@ -930,7 +947,7 @@ restored and all registry state for that attribute is cleaned up.</p>
             </td>
             <td class="doc-param-details">
               <div class="doc-md-description">
-                <p>The same object passed to <code>add_interceptor</code>.</p>
+                <p>The same object passed to :func:<code>add_interceptor</code>.</p>
               </div>
               <p>
                   <span class="doc-param-annotation">
@@ -946,7 +963,7 @@ restored and all registry state for that attribute is cleaned up.</p>
             </td>
             <td class="doc-param-details">
               <div class="doc-md-description">
-                <p>The same attribute name passed to <code>add_interceptor</code>.</p>
+                <p>The same attribute name passed to :func:<code>add_interceptor</code>.</p>
               </div>
               <p>
                   <span class="doc-param-annotation">
@@ -991,6 +1008,8 @@ restored and all registry state for that attribute is cleaned up.</p>
     <div class="doc doc-contents first">
 
         <p>Return <code>True</code> if <em>name</em> on <em>obj</em> has any registered interceptors.</p>
+<p>This check is lock-free — a concurrent mutation may cause the result
+to be momentarily stale, which is acceptable for introspection.</p>
 
 
 <table>
@@ -1007,7 +1026,7 @@ restored and all registry state for that attribute is cleaned up.</p>
             </td>
             <td class="doc-param-details">
               <div class="doc-md-description">
-                <p>The same object passed to <code>add_interceptor</code>.</p>
+                <p>The same object passed to :func:<code>add_interceptor</code>.</p>
               </div>
               <p>
                   <span class="doc-param-annotation">
@@ -1023,7 +1042,7 @@ restored and all registry state for that attribute is cleaned up.</p>
             </td>
             <td class="doc-param-details">
               <div class="doc-md-description">
-                <p>The same attribute name passed to <code>add_interceptor</code>.</p>
+                <p>The same attribute name passed to :func:<code>add_interceptor</code>.</p>
               </div>
               <p>
                   <span class="doc-param-annotation">
@@ -1072,6 +1091,9 @@ restored and all registry state for that attribute is cleaned up.</p>
     <div class="doc doc-contents first">
 
         <p>Return all interceptors added for <em>name</em> on <em>obj</em>, in registration order.</p>
+<p>This check is lock-free — the returned snapshot is a point-in-time
+view, safe against concurrent mutation via the internal <code>list(...)</code>
+copy.</p>
 
 
 <table>
@@ -1088,7 +1110,7 @@ restored and all registry state for that attribute is cleaned up.</p>
             </td>
             <td class="doc-param-details">
               <div class="doc-md-description">
-                <p>The same object passed to <code>add_interceptor</code>.</p>
+                <p>The same object passed to :func:<code>add_interceptor</code>.</p>
               </div>
               <p>
                   <span class="doc-param-annotation">
@@ -1104,7 +1126,7 @@ restored and all registry state for that attribute is cleaned up.</p>
             </td>
             <td class="doc-param-details">
               <div class="doc-md-description">
-                <p>The same attribute name passed to <code>add_interceptor</code>.</p>
+                <p>The same attribute name passed to :func:<code>add_interceptor</code>.</p>
               </div>
               <p>
                   <span class="doc-param-annotation">
@@ -1129,14 +1151,15 @@ restored and all registry state for that attribute is cleaned up.</p>
           <tr class="doc-section-item">
             <td>
                 <span class="doc-returns-annotation">
-                    <code><span title="list">list</span>[<span title="dict">dict</span>]</code>
+                    <code>list of dict</code>
                 </span>
             </td>
             <td class="doc-returns-details">
               <div class="doc-md-description">
                 <p>Each dict contains <code>id</code>, <code>func</code>, <code>pass_self</code>, <code>pass_args</code>,
 <code>pass_kwargs</code>, <code>is_context_manager</code>, and <code>callorder</code> (raw
-registered value — may be a callable).  Empty list if none registered.</p>
+registered value — may be a callable).  Empty list if none
+registered.</p>
               </div>
             </td>
           </tr>
