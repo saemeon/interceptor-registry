@@ -6,7 +6,7 @@ from importlib.metadata import PackageNotFoundError, version
 
 try:
     __version__ = version("interceptor-registry")
-except PackageNotFoundError:
+except PackageNotFoundError:  # pragma: no cover - import-time fallback when uninstalled
     __version__ = "unknown"
 
 from interceptor_registry._registry import (
