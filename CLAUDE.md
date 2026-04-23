@@ -1,9 +1,10 @@
 # interceptor-registry — v0.2 design record
 
-**Status**: v0.2.0 **shipped.** 288 tests passing, 100% coverage,
-ruff / ruff format / ty all clean. Phases 1 and 2 of the plan below
-landed complete; the three bugs surfaced during extensive testing
-were all fixed before release.
+**Status**: v0.2.0 **shipped.** 292 tests passing (288 unit + 4
+doctests run via `--doctest-modules`), 100% coverage, ruff /
+ruff format / ty / `mkdocs build --strict` all clean. Phases 1 and
+2 of the plan below landed complete; the three bugs surfaced
+during extensive testing were all fixed before release.
 
 **Kept as a historical record** of how v0.2 was planned, what
 design decisions were made, and which wrapt patterns were
